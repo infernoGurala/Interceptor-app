@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/feed_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/cobalt_service.dart';
+import '../services/instagram_service.dart';
 import '../services/local_cache_service.dart';
 import '../models/feed_item.dart';
 import '../utils/feed_randomizer.dart';
@@ -33,6 +34,10 @@ final cloudinaryServiceProvider = Provider<CloudinaryService>(
 
 final cobaltServiceProvider = Provider<CobaltService>(
   (ref) => CobaltService(),
+);
+
+final instagramServiceProvider = Provider<InstagramService>(
+  (ref) => InstagramService(),
 );
 
 final localCacheServiceProvider = Provider<LocalCacheService>(

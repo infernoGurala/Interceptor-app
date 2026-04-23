@@ -126,15 +126,28 @@ class _JetScreenState extends ConsumerState<JetScreen> {
           throw Exception('Please paste a link');
         }
 
-        setState(() => _statusMessage = 'Extracting media URL...');
+        final sourceLink = _linkController.text.trim();
+        String rawMediaUrl;
+        final instagram = ref.read(instagramServiceProvider);
+        final shouldUseInstagramExtractor =
+            _selectedType == ContentType.video &&
+            instagram.isInstagramReelOrPostUrl(sourceLink);
 
-        // Cobalt: extract raw URL from platform link
-        final cobalt = ref.read(cobaltServiceProvider);
-        final cobaltResult =
-            await cobalt.extractMediaUrl(_linkController.text.trim());
+        if (shouldUseInstagramExtractor) {
+          setState(() => _statusMessage = 'Extracting Instagram video URL...');
+          rawMediaUrl = await instagram.extractVideoUrl(sourceLink);
+        } else {
+          setState(() => _statusMessage = 'Extracting media URL...');
 
-        if (!cobaltResult.success) {
-          throw Exception(cobaltResult.error ?? 'Failed to extract media URL');
+          // Cobalt: extract raw URL from platform link
+          final cobalt = ref.read(cobaltServiceProvider);
+          final cobaltResult = await cobalt.extractMediaUrl(sourceLink);
+
+          if (!cobaltResult.success) {
+            throw Exception(cobaltResult.error ?? 'Failed to extract media URL');
+          }
+
+          rawMediaUrl = cobaltResult.url!;
         }
 
         setState(() => _statusMessage = 'Uploading to cloud...');
@@ -142,7 +155,7 @@ class _JetScreenState extends ConsumerState<JetScreen> {
         // Cloudinary: upload from raw URL
         final cloudinary = ref.read(cloudinaryServiceProvider);
         final cloudinaryUrl = await cloudinary.uploadFromUrl(
-          cobaltResult.url!,
+          rawMediaUrl,
           _selectedType == ContentType.image ? 'image' : 'video',
         );
 
