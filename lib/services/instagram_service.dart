@@ -34,7 +34,7 @@ class InstagramService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
-        'Failed to fetch Instagram page ($instagramUrl): ${response.statusCode}',
+        'Failed to fetch Instagram page (${_safeLogUrl(uri)}): ${response.statusCode}',
       );
     }
 
@@ -44,7 +44,7 @@ class InstagramService {
 
     if (extractedUrl == null || extractedUrl.isEmpty) {
       throw Exception(
-        'Could not extract video URL from Instagram page: $instagramUrl',
+        'Could not extract video URL from Instagram page: ${_safeLogUrl(uri)}',
       );
     }
 
@@ -79,7 +79,7 @@ class InstagramService {
   /// Extracts an Instagram `video_url` value from JSON embedded in scripts.
   String? _extractFromScriptJson(String html) {
     final match = RegExp(
-      r'"video_url":"(https?:\\?/\\?/[^"]+)"',
+      r'"video_url":"(https?:(?:\\\\/\\\\/|//)[^"]+)"',
       caseSensitive: false,
     ).firstMatch(html);
     final value = match?.group(1);
@@ -93,5 +93,9 @@ class InstagramService {
         .replaceAll('&amp;', '&')
         .replaceAll(r'\/', '/')
         .replaceAll(r'\u0026', '&');
+  }
+
+  String _safeLogUrl(Uri uri) {
+    return uri.replace(query: '', fragment: '').toString();
   }
 }
