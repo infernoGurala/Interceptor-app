@@ -34,7 +34,7 @@ class InstagramService {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
-        'Instagram request failed with ${response.statusCode}',
+        'Failed to fetch Instagram page ($instagramUrl): ${response.statusCode}',
       );
     }
 
@@ -43,12 +43,16 @@ class InstagramService {
     final extractedUrl = _extractFromMetaTag(html) ?? _extractFromScriptJson(html);
 
     if (extractedUrl == null || extractedUrl.isEmpty) {
-      throw Exception('Could not extract Instagram video URL');
+      throw Exception(
+        'Could not extract video URL from Instagram page: $instagramUrl',
+      );
     }
 
     return extractedUrl;
   }
 
+  /// Extracts an Open Graph video URL from HTML meta tags such as
+  /// `og:video` and `og:video:secure_url`.
   String? _extractFromMetaTag(String html) {
     final regexes = <RegExp>[
       RegExp(
@@ -72,6 +76,7 @@ class InstagramService {
     return null;
   }
 
+  /// Extracts an Instagram `video_url` value from JSON embedded in scripts.
   String? _extractFromScriptJson(String html) {
     final match = RegExp(
       r'"video_url":"(https?:\\?/\\?/[^"]+)"',
@@ -82,6 +87,7 @@ class InstagramService {
     return _normalizeExtractedUrl(value);
   }
 
+  /// Normalizes encoded/escaped URL fragments returned from HTML or script JSON.
   String _normalizeExtractedUrl(String value) {
     return value
         .replaceAll('&amp;', '&')
