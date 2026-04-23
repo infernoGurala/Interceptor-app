@@ -192,23 +192,7 @@ class _VideoCardState extends State<VideoCard>
                 ),
               ),
 
-            // Content type indicator
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              left: 16,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.videocam_rounded,
-                  color: Colors.white,
-                  size: 16,
-                ),
-              ),
-            ),
+
 
             // Private note icon
             if (widget.item.note != null && widget.item.note!.isNotEmpty)

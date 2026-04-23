@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:uuid/uuid.dart';
 import '../models/feed_item.dart';
 import '../providers/providers.dart';
 import '../utils/connectivity.dart';
+import '../widgets/markdown_toolbar.dart';
 
 /// The upload screen where users add content to their feed.
+/// Text mode features an Obsidian-style markdown editor with live preview,
+/// formatting toolbar, and undo/redo support.
 class JetScreen extends ConsumerStatefulWidget {
   const JetScreen({super.key});
 
@@ -20,15 +24,80 @@ class _JetScreenState extends ConsumerState<JetScreen> {
   final _linkController = TextEditingController();
   final _textController = TextEditingController();
   final _noteController = TextEditingController();
+  final _textFocusNode = FocusNode();
   bool _isUploading = false;
   String? _statusMessage;
   bool _isError = false;
+  bool _showPreview = false;
+
+  // Undo/Redo stacks
+  final List<_EditSnapshot> _undoStack = [];
+  final List<_EditSnapshot> _redoStack = [];
+  String _lastText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _textController.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final currentText = _textController.text;
+    // Only push to undo if text actually changed (not just selection)
+    if (currentText != _lastText) {
+      _undoStack.add(_EditSnapshot(
+        text: _lastText,
+        selection: _textController.selection,
+      ));
+      // Limit stack size
+      if (_undoStack.length > 100) _undoStack.removeAt(0);
+      _redoStack.clear();
+      _lastText = currentText;
+      setState(() {}); // refresh undo/redo button states
+    }
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    final snapshot = _undoStack.removeLast();
+    _redoStack.add(_EditSnapshot(
+      text: _textController.text,
+      selection: _textController.selection,
+    ));
+    _lastText = snapshot.text;
+    _textController.removeListener(_onTextChanged);
+    _textController.value = TextEditingValue(
+      text: snapshot.text,
+      selection: snapshot.selection,
+    );
+    _textController.addListener(_onTextChanged);
+    setState(() {});
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    final snapshot = _redoStack.removeLast();
+    _undoStack.add(_EditSnapshot(
+      text: _textController.text,
+      selection: _textController.selection,
+    ));
+    _lastText = snapshot.text;
+    _textController.removeListener(_onTextChanged);
+    _textController.value = TextEditingValue(
+      text: snapshot.text,
+      selection: snapshot.selection,
+    );
+    _textController.addListener(_onTextChanged);
+    setState(() {});
+  }
 
   @override
   void dispose() {
+    _textController.removeListener(_onTextChanged);
     _linkController.dispose();
     _textController.dispose();
     _noteController.dispose();
+    _textFocusNode.dispose();
     super.dispose();
   }
 
@@ -117,12 +186,16 @@ class _JetScreenState extends ConsumerState<JetScreen> {
       setState(() {
         _statusMessage = 'Added to your feed!';
         _isError = false;
+        _showPreview = false;
       });
 
       // Clear fields
       _linkController.clear();
       _textController.clear();
       _noteController.clear();
+      _undoStack.clear();
+      _redoStack.clear();
+      _lastText = '';
 
       // Clear status after 2s
       Future.delayed(const Duration(seconds: 2), () {
@@ -145,275 +218,424 @@ class _JetScreenState extends ConsumerState<JetScreen> {
     final theme = Theme.of(context);
     final accent = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
+    final isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final showToolbar = isKeyboardOpen &&
+        _selectedType == ContentType.text &&
+        _textFocusNode.hasFocus;
 
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Text(
-                'Jet',
-                style: GoogleFonts.inter(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w700,
-                  color: theme.textTheme.bodyLarge?.color,
-                  letterSpacing: -1,
-                ),
-              )
-                  .animate()
-                  .fadeIn(duration: 400.ms)
-                  .slideX(begin: -0.1, end: 0),
-              const SizedBox(height: 4),
-              Text(
-                'Add content to your feed',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  color: theme.textTheme.bodySmall?.color,
-                ),
-              )
-                  .animate()
-                  .fadeIn(delay: 100.ms, duration: 400.ms),
-              const SizedBox(height: 32),
+      resizeToAvoidBottomInset: true,
+      body: Column(
+        children: [
+          // Main content — scrollable
+          Expanded(
+            child: SafeArea(
+              bottom: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Text(
+                      'Jet',
+                      style: GoogleFonts.inter(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textTheme.bodyLarge?.color,
+                        letterSpacing: -1,
+                      ),
+                    )
+                        .animate()
+                        .fadeIn(duration: 400.ms)
+                        .slideX(begin: -0.1, end: 0),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Add content to your feed',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: theme.textTheme.bodySmall?.color,
+                      ),
+                    )
+                        .animate()
+                        .fadeIn(delay: 100.ms, duration: 400.ms),
+                    const SizedBox(height: 32),
 
-              // Content type selector
-              Text(
-                'Content type',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: theme.textTheme.bodySmall?.color,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: ContentType.values.map((type) {
-                  final isSelected = _selectedType == type;
-                  final label = type.name[0].toUpperCase() + type.name.substring(1);
-                  final icon = type == ContentType.text
-                      ? Icons.article_rounded
-                      : type == ContentType.image
-                          ? Icons.image_rounded
-                          : Icons.videocam_rounded;
+                    // Content type selector
+                    Text(
+                      'Content type',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textTheme.bodySmall?.color,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: ContentType.values.map((type) {
+                        final isSelected = _selectedType == type;
+                        final label =
+                            type.name[0].toUpperCase() + type.name.substring(1);
+                        final icon = type == ContentType.text
+                            ? Icons.article_rounded
+                            : type == ContentType.image
+                                ? Icons.image_rounded
+                                : Icons.videocam_rounded;
 
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedType = type),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        margin: EdgeInsets.only(
-                          right: type != ContentType.video ? 8 : 0,
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? accent.withValues(alpha: 0.12)
-                              : isDark
-                                  ? Colors.white.withValues(alpha: 0.04)
-                                  : Colors.black.withValues(alpha: 0.03),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: isSelected
-                                ? accent.withValues(alpha: 0.35)
-                                : Colors.transparent,
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() => _selectedType = type),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              margin: EdgeInsets.only(
+                                right: type != ContentType.video ? 8 : 0,
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? accent.withValues(alpha: 0.12)
+                                    : isDark
+                                        ? Colors.white
+                                            .withValues(alpha: 0.04)
+                                        : Colors.black
+                                            .withValues(alpha: 0.03),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? accent.withValues(alpha: 0.35)
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(icon,
+                                      color: isSelected
+                                          ? accent
+                                          : theme
+                                              .textTheme.bodySmall?.color,
+                                      size: 22),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    label,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                      color: isSelected
+                                          ? accent
+                                          : theme
+                                              .textTheme.bodySmall?.color,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    )
+                        .animate()
+                        .fadeIn(delay: 200.ms, duration: 400.ms),
+                    const SizedBox(height: 32),
+
+                    // Input fields based on content type
+                    if (_selectedType == ContentType.text) ...[
+                      // Header row with preview toggle
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Write your content',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: theme.textTheme.bodySmall?.color,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _showPreview = !_showPreview),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: _showPreview
+                                    ? accent.withValues(alpha: 0.15)
+                                    : isDark
+                                        ? Colors.white
+                                            .withValues(alpha: 0.06)
+                                        : Colors.black
+                                            .withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _showPreview
+                                      ? accent.withValues(alpha: 0.3)
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _showPreview
+                                        ? Icons.edit_rounded
+                                        : Icons.visibility_rounded,
+                                    size: 14,
+                                    color: _showPreview
+                                        ? accent
+                                        : theme.textTheme.bodySmall?.color,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _showPreview ? 'Edit' : 'Preview',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: _showPreview
+                                          ? accent
+                                          : theme
+                                              .textTheme.bodySmall?.color,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Editor or Preview
+                      AnimatedCrossFade(
+                        firstChild: TextFormField(
+                          controller: _textController,
+                          focusNode: _textFocusNode,
+                          maxLines: 10,
+                          minLines: 5,
+                          style: GoogleFonts.jetBrainsMono(
+                            color: theme.textTheme.bodyLarge?.color,
+                            fontSize: 14,
+                            height: 1.7,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: 'Type something...supports markdown',
+                            alignLabelWithHint: true,
                           ),
                         ),
-                        child: Column(
+                        secondChild: Container(
+                          width: double.infinity,
+                          constraints:
+                              const BoxConstraints(minHeight: 200),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.04)
+                                : Colors.black.withValues(alpha: 0.02),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.white
+                                      .withValues(alpha: 0.08)
+                                  : Colors.black
+                                      .withValues(alpha: 0.06),
+                            ),
+                          ),
+                          child: _textController.text.trim().isEmpty
+                              ? Text(
+                                  'Nothing to preview yet...',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    color: theme.textTheme.bodySmall?.color
+                                        ?.withValues(alpha: 0.4),
+                                  ),
+                                )
+                              : GptMarkdown(
+                                  _textController.text,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 15,
+                                    color:
+                                        theme.textTheme.bodyLarge?.color,
+                                    height: 1.7,
+                                  ),
+                                ),
+                        ),
+                        crossFadeState: _showPreview
+                            ? CrossFadeState.showSecond
+                            : CrossFadeState.showFirst,
+                        duration: const Duration(milliseconds: 250),
+                        sizeCurve: Curves.easeOutCubic,
+                      ),
+                    ] else ...[
+                      Text(
+                        'Paste a link',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: theme.textTheme.bodySmall?.color,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _linkController,
+                        style: GoogleFonts.inter(
+                          color: theme.textTheme.bodyLarge?.color,
+                          fontSize: 15,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText:
+                              'Instagram, YouTube, or any URL...',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'The link will be processed through Cobalt and stored on Cloudinary.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: theme.textTheme.bodySmall?.color
+                              ?.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+
+                    // Private note (optional)
+                    Text(
+                      'Private note (optional)',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textTheme.bodySmall?.color,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _noteController,
+                      maxLines: 3,
+                      minLines: 1,
+                      style: GoogleFonts.inter(
+                        color: theme.textTheme.bodyLarge?.color,
+                        fontSize: 14,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: 'A personal note for this item...',
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Status message
+                    if (_statusMessage != null)
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.all(14),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: _isError
+                              ? theme.colorScheme.error
+                                  .withValues(alpha: 0.1)
+                              : accent.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _isError
+                                ? theme.colorScheme.error
+                                    .withValues(alpha: 0.3)
+                                : accent.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Row(
                           children: [
-                            Icon(icon,
-                                color: isSelected
-                                    ? accent
-                                    : theme.textTheme.bodySmall?.color,
-                                size: 22),
-                            const SizedBox(height: 6),
-                            Text(
-                              label,
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                                color: isSelected
-                                    ? accent
-                                    : theme.textTheme.bodySmall?.color,
+                            if (_isUploading)
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: accent,
+                                ),
+                              )
+                            else
+                              Icon(
+                                _isError
+                                    ? Icons.error_outline
+                                    : Icons.check_circle_outline,
+                                color: _isError
+                                    ? theme.colorScheme.error
+                                    : accent,
+                                size: 18,
+                              ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _statusMessage!,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: _isError
+                                      ? theme.colorScheme.error
+                                      : theme
+                                          .textTheme.bodyMedium?.color,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  );
-                }).toList(),
-              )
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 400.ms),
-              const SizedBox(height: 32),
 
-              // Input fields based on content type
-              if (_selectedType == ContentType.text) ...[
-                Text(
-                  'Write your content',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textTheme.bodySmall?.color,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _textController,
-                  maxLines: 10,
-                  minLines: 5,
-                  style: GoogleFonts.inter(
-                    color: theme.textTheme.bodyLarge?.color,
-                    fontSize: 15,
-                    height: 1.6,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Write or paste markdown here...',
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ] else ...[
-                Text(
-                  'Paste a link',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textTheme.bodySmall?.color,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _linkController,
-                  style: GoogleFonts.inter(
-                    color: theme.textTheme.bodyLarge?.color,
-                    fontSize: 15,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Instagram, YouTube, or any URL...',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'The link will be processed through Cobalt and stored on Cloudinary.',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.5),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-
-              // Private note (optional)
-              Text(
-                'Private note (optional)',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: theme.textTheme.bodySmall?.color,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _noteController,
-                maxLines: 3,
-                minLines: 1,
-                style: GoogleFonts.inter(
-                  color: theme.textTheme.bodyLarge?.color,
-                  fontSize: 14,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'A personal note for this item...',
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              // Status message
-              if (_statusMessage != null)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  padding: const EdgeInsets.all(14),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: _isError
-                        ? theme.colorScheme.error.withValues(alpha: 0.1)
-                        : accent.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _isError
-                          ? theme.colorScheme.error.withValues(alpha: 0.3)
-                          : accent.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      if (_isUploading)
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: accent,
-                          ),
-                        )
-                      else
-                        Icon(
-                          _isError
-                              ? Icons.error_outline
-                              : Icons.check_circle_outline,
-                          color: _isError
-                              ? theme.colorScheme.error
-                              : accent,
-                          size: 18,
-                        ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _statusMessage!,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: _isError
-                                ? theme.colorScheme.error
-                                : theme.textTheme.bodyMedium?.color,
-                          ),
-                        ),
+                    // Upload button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed:
+                            _isUploading ? null : _handleUpload,
+                        icon: _isUploading
+                            ? SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: theme.colorScheme.onPrimary,
+                                ),
+                              )
+                            : const Icon(Icons.bolt_rounded, size: 20),
+                        label: Text(
+                            _isUploading ? 'Processing...' : 'Jet it'),
                       ),
-                    ],
-                  ),
+                    )
+                        .animate()
+                        .fadeIn(delay: 300.ms, duration: 400.ms),
+                  ],
                 ),
-
-              // Upload button
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: _isUploading ? null : _handleUpload,
-                  icon: _isUploading
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Icon(Icons.bolt_rounded, size: 20),
-                  label: Text(_isUploading ? 'Processing...' : 'Jet it'),
-                ),
-              )
-                  .animate()
-                  .fadeIn(delay: 300.ms, duration: 400.ms),
-            ],
+              ),
+            ),
           ),
-        ),
+
+          // Markdown toolbar — appears above keyboard when typing text
+          if (showToolbar)
+            MarkdownToolbar(
+              controller: _textController,
+              canUndo: _undoStack.isNotEmpty,
+              canRedo: _redoStack.isNotEmpty,
+              onUndo: _undo,
+              onRedo: _redo,
+            ),
+        ],
       ),
     );
   }
+}
+
+/// Snapshot of text state for undo/redo.
+class _EditSnapshot {
+  final String text;
+  final TextSelection selection;
+
+  const _EditSnapshot({
+    required this.text,
+    required this.selection,
+  });
 }

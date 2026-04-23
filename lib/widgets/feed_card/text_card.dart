@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:gpt_markdown/gpt_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../models/feed_item.dart';
+import 'mermaid_block.dart';
 
 /// A full-screen text/markdown card for the feed.
-/// Renders markdown with premium typography and internal scrolling.
+/// Renders markdown with LaTeX (both $ and $$) and Mermaid chart support.
 class TextCard extends StatelessWidget {
   final FeedItem item;
   final VoidCallback? onNoteToggle;
@@ -17,16 +18,58 @@ class TextCard extends StatelessWidget {
     this.showNote = false,
   });
 
+  /// Parses content into segments: either plain markdown or mermaid blocks.
+  List<_ContentSegment> _parseContent(String content) {
+    final segments = <_ContentSegment>[];
+    final mermaidPattern = RegExp(
+      r'```mermaid\s*\n([\s\S]*?)```',
+      multiLine: true,
+    );
+
+    int lastEnd = 0;
+    for (final match in mermaidPattern.allMatches(content)) {
+      // Add any markdown before this mermaid block
+      if (match.start > lastEnd) {
+        final mdText = content.substring(lastEnd, match.start).trim();
+        if (mdText.isNotEmpty) {
+          segments.add(_ContentSegment(type: _SegmentType.markdown, content: mdText));
+        }
+      }
+      // Add the mermaid block
+      segments.add(_ContentSegment(
+        type: _SegmentType.mermaid,
+        content: match.group(1)!.trim(),
+      ));
+      lastEnd = match.end;
+    }
+
+    // Add any remaining markdown after the last mermaid block
+    if (lastEnd < content.length) {
+      final mdText = content.substring(lastEnd).trim();
+      if (mdText.isNotEmpty) {
+        segments.add(_ContentSegment(type: _SegmentType.markdown, content: mdText));
+      }
+    }
+
+    // If no mermaid blocks found, return the whole content as markdown
+    if (segments.isEmpty) {
+      segments.add(_ContentSegment(type: _SegmentType.markdown, content: content));
+    }
+
+    return segments;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final segments = _parseContent(item.content);
 
     return Container(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
         children: [
-          // Markdown content with internal scroll
+          // Content with internal scroll
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(
@@ -35,118 +78,49 @@ class TextCard extends StatelessWidget {
                 right: 24,
                 bottom: 120,
               ),
-              child: Scrollbar(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: Markdown(
-                    data: item.content,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    selectable: true,
-                    styleSheet: MarkdownStyleSheet(
-                      h1: GoogleFonts.inter(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.3,
-                      ),
-                      h2: GoogleFonts.inter(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.4,
-                      ),
-                      h3: GoogleFonts.inter(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.4,
-                      ),
-                      h4: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w500,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.4,
-                      ),
-                      p: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.7,
-                      ),
-                      em: GoogleFonts.inter(
-                        fontStyle: FontStyle.italic,
-                        color: theme.textTheme.bodyLarge?.color,
-                      ),
-                      strong: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700,
-                        color: theme.textTheme.bodyLarge?.color,
-                      ),
-                      listBullet: GoogleFonts.inter(
-                        fontSize: 16,
-                        color: theme.textTheme.bodyLarge?.color,
-                        height: 1.7,
-                      ),
-                      code: GoogleFonts.jetBrainsMono(
-                        fontSize: 14,
-                        color: theme.colorScheme.primary,
-                        backgroundColor: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.04),
-                      ),
-                      codeblockDecoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      codeblockPadding: const EdgeInsets.all(16),
-                      blockquoteDecoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(
-                            color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                            width: 3,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return Scrollbar(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight,
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: segments.map((segment) {
+                              if (segment.type == _SegmentType.mermaid) {
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  child: MermaidBlock(
+                                    code: segment.content,
+                                    isDark: isDark,
+                                  ),
+                                );
+                              }
+
+                              // Markdown + LaTeX segment
+                              return SelectionArea(
+                                child: GptMarkdown(
+                                  segment.content,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w400,
+                                    color: theme.textTheme.bodyLarge?.color,
+                                    height: 1.7,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ),
-                      ),
-                      blockquotePadding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      horizontalRuleDecoration: BoxDecoration(
-                        border: Border(
-                          top: BorderSide(
-                            color: theme.dividerColor,
-                            width: 0.5,
-                          ),
-                        ),
-                      ),
-                      a: TextStyle(
-                        color: theme.colorScheme.primary,
-                        decoration: TextDecoration.underline,
-                        decorationColor: theme.colorScheme.primary.withValues(alpha: 0.3),
                       ),
                     ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // Content type indicator
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.black.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.article_rounded,
-                color: theme.textTheme.bodySmall?.color,
-                size: 16,
+                  );
+                },
               ),
             ),
           ),
@@ -206,4 +180,13 @@ class TextCard extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _SegmentType { markdown, mermaid }
+
+class _ContentSegment {
+  final _SegmentType type;
+  final String content;
+
+  const _ContentSegment({required this.type, required this.content});
 }

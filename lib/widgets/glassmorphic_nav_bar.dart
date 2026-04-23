@@ -17,73 +17,132 @@ class GlassmorphicNavBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isVisible = ref.watch(navBarVisibleProvider);
+    final isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+    final isExpanded = ref.watch(navBarVisibleProvider);
+    final isHidden = isKeyboardOpen;
     final theme = Theme.of(context);
     final accent = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
 
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final double expandedWidth = screenWidth - 120; // 60 padding on left and right
+    final double collapsedWidth = 56; // 56x56 FAB size circle
+
+    IconData activeIcon;
+    switch (currentIndex) {
+      case 0:
+        activeIcon = Icons.space_dashboard_rounded;
+        break;
+      case 1:
+        activeIcon = Icons.bolt_rounded;
+        break;
+      case 2:
+        activeIcon = Icons.person_rounded;
+        break;
+      default:
+        activeIcon = Icons.space_dashboard_rounded;
+        break;
+    }
+
     return AnimatedSlide(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
-      offset: isVisible ? Offset.zero : const Offset(0, 1.5),
+      offset: isHidden ? const Offset(0, 1.5) : Offset.zero,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
-        opacity: isVisible ? 1.0 : 0.0,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(60, 0, 60, 24),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(28),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: Container(
-                height: 64,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
+        opacity: isHidden ? 0.0 : 1.0,
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.fromLTRB(
+            isExpanded ? 60 : screenWidth - collapsedWidth - 16,
+            0,
+            isExpanded ? 60 : 16,
+            24,
+          ),
+          child: GestureDetector(
+            onTap: () {
+              if (!isExpanded) {
+                ref.read(navBarVisibleProvider.notifier).state = true;
+              }
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(32),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  height: isExpanded ? 64 : collapsedWidth,
+                  width: isExpanded ? expandedWidth : collapsedWidth,
+                  decoration: BoxDecoration(
                     color: isDark
-                        ? Colors.white.withValues(alpha: 0.12)
-                        : Colors.black.withValues(alpha: 0.08),
-                    width: 0.5,
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.black.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(32),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.15)
+                          : Colors.black.withValues(alpha: 0.1),
+                      width: 0.5,
+                    ),
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _NavItem(
-                      icon: Icons.space_dashboard_outlined,
-                      activeIcon: Icons.space_dashboard_rounded,
-                      label: 'Intercept',
-                      isActive: currentIndex == 0,
-                      accent: accent,
-                      onTap: () => onTap(0),
-                    ),
-                    _NavItem(
-                      icon: Icons.bolt_outlined,
-                      activeIcon: Icons.bolt_rounded,
-                      label: 'Jet',
-                      isActive: currentIndex == 1,
-                      accent: accent,
-                      onTap: () => onTap(1),
-                    ),
-                    _NavItem(
-                      icon: Icons.person_outline_rounded,
-                      activeIcon: Icons.person_rounded,
-                      label: 'Profile',
-                      isActive: currentIndex == 2,
-                      accent: accent,
-                      onTap: () => onTap(2),
-                    ),
-                  ],
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Collapsed State Icon
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 200),
+                        opacity: isExpanded ? 0.0 : 1.0,
+                        child: Icon(activeIcon, color: accent),
+                      ),
+                      
+                      // Expanded State Row
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 200),
+                        opacity: isExpanded ? 1.0 : 0.0,
+                        child: IgnorePointer(
+                          ignoring: !isExpanded,
+                          child: SingleChildScrollView(
+                            physics: const NeverScrollableScrollPhysics(),
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
+                              width: expandedWidth,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  _NavItem(
+                                    icon: Icons.space_dashboard_outlined,
+                                    activeIcon: Icons.space_dashboard_rounded,
+                                    label: 'Intercept',
+                                    isActive: currentIndex == 0,
+                                    accent: accent,
+                                    onTap: () => onTap(0),
+                                  ),
+                                  _NavItem(
+                                    icon: Icons.bolt_outlined,
+                                    activeIcon: Icons.bolt_rounded,
+                                    label: 'Jet',
+                                    isActive: currentIndex == 1,
+                                    accent: accent,
+                                    onTap: () => onTap(1),
+                                  ),
+                                  _NavItem(
+                                    icon: Icons.person_outline_rounded,
+                                    activeIcon: Icons.person_rounded,
+                                    label: 'Profile',
+                                    isActive: currentIndex == 2,
+                                    accent: accent,
+                                    onTap: () => onTap(2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

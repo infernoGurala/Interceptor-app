@@ -59,23 +59,7 @@ class ImageCard extends StatelessWidget {
             ),
           ),
 
-          // Content type indicator
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.image_rounded,
-                color: Colors.white,
-                size: 16,
-              ),
-            ),
-          ),
+
 
           // Private note
           if (item.note != null && item.note!.isNotEmpty)

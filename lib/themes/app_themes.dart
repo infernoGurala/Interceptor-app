@@ -15,6 +15,7 @@ class AppThemes {
     'Ink',
     'Paper',
     'Ember',
+    'Ivory',
   ];
 
   // ─────────────────────────────────────
@@ -39,6 +40,10 @@ class AppThemes {
   static const _emberDark = Color(0xFF1C1410);
   static const _emberLight = Color(0xFFFFF8F0);
   static const _emberAccent = Color(0xFFD4915E);
+
+  static const _ivoryDark = Color(0xFF151515);
+  static const _ivoryLight = Color(0xFFFDFDFD);
+  static const _ivoryAccent = Color(0xFFD4AF37); // Luxury Gold
 
   // ─────────────────────────────────────
   // Theme builder
@@ -274,6 +279,27 @@ class AppThemes {
       );
 
   // ─────────────────────────────────────
+  // IVORY (Luxury Premium White/Gold)
+  // ─────────────────────────────────────
+  static ThemeData get ivoryDark => _buildTheme(
+        background: _ivoryDark,
+        surface: const Color(0xFF1E1E1E),
+        accent: _ivoryAccent,
+        textPrimary: const Color(0xFFF0F0F0),
+        textSecondary: const Color(0xFF9E9E9E),
+        brightness: Brightness.dark,
+      );
+
+  static ThemeData get ivoryLight => _buildTheme(
+        background: _ivoryLight,
+        surface: Colors.white,
+        accent: _ivoryAccent,
+        textPrimary: const Color(0xFF111111),
+        textSecondary: const Color(0xFF888888),
+        brightness: Brightness.light,
+      );
+
+  // ─────────────────────────────────────
   // Getters by name
   // ─────────────────────────────────────
   static ThemeData getTheme(String name, bool isDark) {
@@ -288,6 +314,8 @@ class AppThemes {
         return isDark ? paperDark : paperLight;
       case 'ember':
         return isDark ? emberDark : emberLight;
+      case 'ivory':
+        return isDark ? ivoryDark : ivoryLight;
       default:
         return isDark ? obsidianDark : obsidianLight;
     }
@@ -306,6 +334,8 @@ class AppThemes {
         return isDark ? const Color(0xFFD4CFC8) : _paperAccent;
       case 'ember':
         return isDark ? _emberAccent : const Color(0xFFC07B3F);
+      case 'ivory':
+        return _ivoryAccent;
       default:
         return isDark ? _obsidianAccent : const Color(0xFF2A2A2A);
     }
@@ -324,6 +354,8 @@ class AppThemes {
         return isDark ? _paperDark : _paperLight;
       case 'ember':
         return isDark ? _emberDark : _emberLight;
+      case 'ivory':
+        return isDark ? _ivoryDark : _ivoryLight;
       default:
         return isDark ? _obsidianDark : _obsidianLight;
     }
