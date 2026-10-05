@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
@@ -17,6 +18,13 @@ class ImageCard extends StatelessWidget {
     this.showNote = false,
   });
 
+  ImageProvider _resolveImageProvider(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return CachedNetworkImageProvider(path);
+    }
+    return FileImage(File(path));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -28,7 +36,7 @@ class ImageCard extends StatelessWidget {
         children: [
           // Image with pinch-to-zoom
           PhotoView(
-            imageProvider: CachedNetworkImageProvider(item.content),
+            imageProvider: _resolveImageProvider(item.content),
             backgroundDecoration: BoxDecoration(
               color: theme.scaffoldBackgroundColor,
             ),

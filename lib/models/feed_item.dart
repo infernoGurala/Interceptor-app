@@ -2,7 +2,8 @@
 enum ContentType {
   text,
   image,
-  video;
+  video,
+  audio;
 
   /// Convert from string (stored in Supabase).
   static ContentType fromString(String value) {

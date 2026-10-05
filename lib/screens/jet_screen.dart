@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:uuid/uuid.dart';
-import '../models/feed_item.dart';
+import 'package:path/path.dart' as p;
 import '../providers/providers.dart';
-import '../utils/connectivity.dart';
 
-/// The upload screen where users add content to their feed.
+/// The editor screen where users write Markdown notes to add to their feed.
 class JetScreen extends ConsumerStatefulWidget {
   const JetScreen({super.key});
 
@@ -16,126 +15,80 @@ class JetScreen extends ConsumerStatefulWidget {
 }
 
 class _JetScreenState extends ConsumerState<JetScreen> {
-  ContentType _selectedType = ContentType.text;
-  final _linkController = TextEditingController();
-  final _textController = TextEditingController();
+  final _titleController = TextEditingController();
+  final _bodyController = TextEditingController();
   final _noteController = TextEditingController();
-  bool _isUploading = false;
+
+  bool _isPreviewMode = false;
+  bool _isSaving = false;
   String? _statusMessage;
   bool _isError = false;
 
   @override
   void dispose() {
-    _linkController.dispose();
-    _textController.dispose();
+    _titleController.dispose();
+    _bodyController.dispose();
     _noteController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleUpload() async {
-    final user = ref.read(currentUserProvider);
-    if (user == null) return;
+  Future<void> _handleSave() async {
+    final title = _titleController.text.trim();
+    final body = _bodyController.text.trim();
+
+    if (title.isEmpty && body.isEmpty) {
+      setState(() {
+        _statusMessage = 'Please enter a title or markdown content';
+        _isError = true;
+      });
+      return;
+    }
 
     setState(() {
-      _isUploading = true;
-      _statusMessage = null;
+      _isSaving = true;
+      _statusMessage = 'Saving markdown note...';
       _isError = false;
     });
 
     try {
-      String content;
+      final folderService = ref.read(localFolderServiceProvider);
+      final folderPath = ref.read(selectedFolderProvider).value;
 
-      if (_selectedType == ContentType.text) {
-        // Text/markdown — direct content
-        if (_textController.text.trim().isEmpty) {
-          throw Exception('Please enter some content');
-        }
-        content = _textController.text.trim();
-      } else {
-        // Image/Video — process link
-        if (_linkController.text.trim().isEmpty) {
-          throw Exception('Please paste a link');
-        }
+      final noteTitle = title.isNotEmpty ? title : 'Untitled Note';
 
-        setState(() => _statusMessage = 'Extracting media URL...');
-
-        // Cobalt: extract raw URL from platform link
-        final cobalt = ref.read(cobaltServiceProvider);
-        final cobaltResult =
-            await cobalt.extractMediaUrl(_linkController.text.trim());
-
-        if (!cobaltResult.success) {
-          throw Exception(cobaltResult.error ?? 'Failed to extract media URL');
-        }
-
-        setState(() => _statusMessage = 'Uploading to cloud...');
-
-        // Cloudinary: upload from raw URL
-        final cloudinary = ref.read(cloudinaryServiceProvider);
-        final cloudinaryUrl = await cloudinary.uploadFromUrl(
-          cobaltResult.url!,
-          _selectedType == ContentType.image ? 'image' : 'video',
-        );
-
-        if (cloudinaryUrl == null) {
-          throw Exception('Failed to upload to cloud storage');
-        }
-
-        content = cloudinaryUrl;
-      }
-
-      setState(() => _statusMessage = 'Saving...');
-
-      // Create feed item
-      final item = FeedItem(
-        id: const Uuid().v4(),
-        userId: user.id,
-        type: _selectedType,
-        content: content,
+      await folderService.createMarkdownNote(
+        title: noteTitle,
+        content: body,
         note: _noteController.text.trim().isEmpty
             ? null
             : _noteController.text.trim(),
-        createdAt: DateTime.now(),
-        sourceUrl: _selectedType != ContentType.text
-            ? _linkController.text.trim()
-            : null,
+        folderPath: folderPath,
       );
-
-      // Save: online → Supabase. Offline → local
-      final connected = await isConnected();
-      if (connected) {
-        final feedService = ref.read(feedServiceProvider);
-        await feedService.createFeedItem(item);
-      } else {
-        final cache = ref.read(localCacheServiceProvider);
-        await cache.saveItemLocally(item);
-      }
 
       // Refresh feed
       ref.invalidate(feedItemsProvider);
 
       setState(() {
-        _statusMessage = 'Added to your feed!';
+        _statusMessage = 'Saved note to folder!';
         _isError = false;
       });
 
       // Clear fields
-      _linkController.clear();
-      _textController.clear();
+      _titleController.clear();
+      _bodyController.clear();
       _noteController.clear();
 
-      // Clear status after 2s
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _statusMessage = null);
       });
     } catch (e) {
       setState(() {
-        _statusMessage = e.toString().replaceAll('Exception: ', '');
+        _statusMessage = 'Error saving note: $e';
         _isError = true;
       });
     } finally {
       if (mounted) {
-        setState(() => _isUploading = false);
+        setState(() => _isSaving = false);
       }
     }
   }
@@ -145,6 +98,8 @@ class _JetScreenState extends ConsumerState<JetScreen> {
     final theme = Theme.of(context);
     final accent = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
+    final folderPath = ref.watch(selectedFolderProvider).value;
+    final folderName = folderPath != null ? p.basename(folderPath) : 'Local Folder';
 
     return Scaffold(
       body: SafeArea(
@@ -154,33 +109,82 @@ class _JetScreenState extends ConsumerState<JetScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Header
-              Text(
-                'Jet',
-                style: GoogleFonts.inter(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w700,
-                  color: theme.textTheme.bodyLarge?.color,
-                  letterSpacing: -1,
-                ),
-              )
-                  .animate()
-                  .fadeIn(duration: 400.ms)
-                  .slideX(begin: -0.1, end: 0),
-              const SizedBox(height: 4),
-              Text(
-                'Add content to your feed',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  color: theme.textTheme.bodySmall?.color,
-                ),
-              )
-                  .animate()
-                  .fadeIn(delay: 100.ms, duration: 400.ms),
-              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Write',
+                          style: GoogleFonts.inter(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w700,
+                            color: theme.textTheme.bodyLarge?.color,
+                            letterSpacing: -1,
+                          ),
+                        )
+                            .animate()
+                            .fadeIn(duration: 400.ms)
+                            .slideX(begin: -0.1, end: 0),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Create Markdown note in $folderName',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: theme.textTheme.bodySmall?.color,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Edit / Preview Toggle
+                  Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          onPressed: () => setState(() => _isPreviewMode = false),
+                          icon: Icon(
+                            Icons.edit_note_rounded,
+                            color: !_isPreviewMode
+                                ? accent
+                                : theme.textTheme.bodySmall?.color,
+                            size: 22,
+                          ),
+                          tooltip: 'Edit',
+                        ),
+                        IconButton(
+                          onPressed: () => setState(() => _isPreviewMode = true),
+                          icon: Icon(
+                            Icons.visibility_rounded,
+                            color: _isPreviewMode
+                                ? accent
+                                : theme.textTheme.bodySmall?.color,
+                            size: 20,
+                          ),
+                          tooltip: 'Preview',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
 
-              // Content type selector
+              // Title Field
               Text(
-                'Content type',
+                'Title',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -188,131 +192,104 @@ class _JetScreenState extends ConsumerState<JetScreen> {
                   letterSpacing: 0.5,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: ContentType.values.map((type) {
-                  final isSelected = _selectedType == type;
-                  final label = type.name[0].toUpperCase() + type.name.substring(1);
-                  final icon = type == ContentType.text
-                      ? Icons.article_rounded
-                      : type == ContentType.image
-                          ? Icons.image_rounded
-                          : Icons.videocam_rounded;
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _titleController,
+                style: GoogleFonts.inter(
+                  color: theme.textTheme.bodyLarge?.color,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Note Title...',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 20),
 
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedType = type),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        margin: EdgeInsets.only(
-                          right: type != ContentType.video ? 8 : 0,
+              // Body Field or Preview
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _isPreviewMode ? 'Markdown Preview' : 'Markdown Content',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: theme.textTheme.bodySmall?.color,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  if (!_isPreviewMode)
+                    Flexible(
+                      child: Text(
+                        'Supports # H1, **bold**, `code`',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? accent.withValues(alpha: 0.12)
-                              : isDark
-                                  ? Colors.white.withValues(alpha: 0.04)
-                                  : Colors.black.withValues(alpha: 0.03),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: isSelected
-                                ? accent.withValues(alpha: 0.35)
-                                : Colors.transparent,
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(icon,
-                                color: isSelected
-                                    ? accent
-                                    : theme.textTheme.bodySmall?.color,
-                                size: 22),
-                            const SizedBox(height: 6),
-                            Text(
-                              label,
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                fontWeight: isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                                color: isSelected
-                                    ? accent
-                                    : theme.textTheme.bodySmall?.color,
-                              ),
-                            ),
-                          ],
-                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  );
-                }).toList(),
-              )
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 400.ms),
-              const SizedBox(height: 32),
+                ],
+              ),
+              const SizedBox(height: 8),
 
-              // Input fields based on content type
-              if (_selectedType == ContentType.text) ...[
-                Text(
-                  'Write your content',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textTheme.bodySmall?.color,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
+              if (!_isPreviewMode) ...[
                 TextFormField(
-                  controller: _textController,
-                  maxLines: 10,
-                  minLines: 5,
+                  controller: _bodyController,
+                  maxLines: 12,
+                  minLines: 6,
                   style: GoogleFonts.inter(
                     color: theme.textTheme.bodyLarge?.color,
                     fontSize: 15,
                     height: 1.6,
                   ),
                   decoration: const InputDecoration(
-                    hintText: 'Write or paste markdown here...',
+                    hintText: 'Write your markdown content here...',
                     alignLabelWithHint: true,
                   ),
+                  onChanged: (_) => setState(() {}),
                 ),
               ] else ...[
-                Text(
-                  'Paste a link',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: theme.textTheme.bodySmall?.color,
-                    letterSpacing: 0.5,
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(minHeight: 180),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.black.withValues(alpha: 0.02),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: theme.dividerColor.withValues(alpha: 0.2),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _linkController,
-                  style: GoogleFonts.inter(
-                    color: theme.textTheme.bodyLarge?.color,
-                    fontSize: 15,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Instagram, YouTube, or any URL...',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'The link will be processed through Cobalt and stored on Cloudinary.',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                  child: MarkdownBody(
+                    data: _bodyController.text.isEmpty
+                        ? '*No content to preview*'
+                        : '# ${_titleController.text}\n\n${_bodyController.text}',
+                    styleSheet: MarkdownStyleSheet(
+                      h1: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: theme.textTheme.bodyLarge?.color,
+                      ),
+                      p: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: theme.textTheme.bodyLarge?.color,
+                        height: 1.6,
+                      ),
+                    ),
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-              // Private note (optional)
+              // Optional Tag / Note
               Text(
-                'Private note (optional)',
+                'Private note or metadata (optional)',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -320,20 +297,19 @@ class _JetScreenState extends ConsumerState<JetScreen> {
                   letterSpacing: 0.5,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               TextFormField(
                 controller: _noteController,
-                maxLines: 3,
-                minLines: 1,
+                maxLines: 2,
                 style: GoogleFonts.inter(
                   color: theme.textTheme.bodyLarge?.color,
                   fontSize: 14,
                 ),
                 decoration: const InputDecoration(
-                  hintText: 'A personal note for this item...',
+                  hintText: 'Personal note attached at the end...',
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 28),
 
               // Status message
               if (_statusMessage != null)
@@ -354,7 +330,7 @@ class _JetScreenState extends ConsumerState<JetScreen> {
                   ),
                   child: Row(
                     children: [
-                      if (_isUploading)
+                      if (_isSaving)
                         SizedBox(
                           width: 16,
                           height: 16,
@@ -389,13 +365,13 @@ class _JetScreenState extends ConsumerState<JetScreen> {
                   ),
                 ),
 
-              // Upload button
+              // Save button
               SizedBox(
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton.icon(
-                  onPressed: _isUploading ? null : _handleUpload,
-                  icon: _isUploading
+                  onPressed: _isSaving ? null : _handleSave,
+                  icon: _isSaving
                       ? SizedBox(
                           width: 18,
                           height: 18,
@@ -404,12 +380,10 @@ class _JetScreenState extends ConsumerState<JetScreen> {
                             color: theme.colorScheme.onPrimary,
                           ),
                         )
-                      : const Icon(Icons.bolt_rounded, size: 20),
-                  label: Text(_isUploading ? 'Processing...' : 'Jet it'),
+                      : const Icon(Icons.note_add_rounded, size: 20),
+                  label: Text(_isSaving ? 'Saving...' : 'Save Markdown Note'),
                 ),
-              )
-                  .animate()
-                  .fadeIn(delay: 300.ms, duration: 400.ms),
+              ),
             ],
           ),
         ),

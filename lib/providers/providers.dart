@@ -1,121 +1,154 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/auth_service.dart';
-import '../services/feed_service.dart';
-import '../services/cloudinary_service.dart';
-import '../services/cobalt_service.dart';
-import '../services/local_cache_service.dart';
+import '../services/local_folder_service.dart';
 import '../models/feed_item.dart';
-import '../utils/feed_randomizer.dart';
-import '../utils/connectivity.dart';
+import 'vaults_provider.dart';
 
 // ─────────────────────────────────────
-// Supabase client provider
+// Local Folder Service provider
 // ─────────────────────────────────────
-final supabaseClientProvider = Provider<SupabaseClient>(
-  (ref) => Supabase.instance.client,
+final localFolderServiceProvider = Provider<LocalFolderService>(
+  (ref) => LocalFolderService(),
 );
 
 // ─────────────────────────────────────
-// Service providers
+// Selected Folder Path State Provider
 // ─────────────────────────────────────
-final authServiceProvider = Provider<AuthService>(
-  (ref) => AuthService(ref.read(supabaseClientProvider)),
-);
+class SelectedFolderNotifier extends StateNotifier<AsyncValue<String?>> {
+  final LocalFolderService _service;
 
-final feedServiceProvider = Provider<FeedService>(
-  (ref) => FeedService(ref.read(supabaseClientProvider)),
-);
+  SelectedFolderNotifier(this._service) : super(const AsyncValue.loading()) {
+    init();
+  }
 
-final cloudinaryServiceProvider = Provider<CloudinaryService>(
-  (ref) => CloudinaryService(),
-);
+  Future<void> init() async {
+    try {
+      final path = await _service.getSelectedFolderPath();
+      if (path != null) {
+        state = AsyncValue.data(path);
+      } else {
+        final defaultPath = await _service.getDefaultFolderPath();
+        state = AsyncValue.data(defaultPath);
+      }
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
 
-final cobaltServiceProvider = Provider<CobaltService>(
-  (ref) => CobaltService(),
-);
+  Future<void> setFolderPath(String path) async {
+    state = const AsyncValue.loading();
+    try {
+      await _service.setSelectedFolderPath(path);
+      state = AsyncValue.data(path);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
 
-final localCacheServiceProvider = Provider<LocalCacheService>(
-  (ref) => LocalCacheService(),
-);
+  Future<void> refresh() async {
+    init();
+  }
+}
 
-// ─────────────────────────────────────
-// Auth state provider
-// ─────────────────────────────────────
-final authStateProvider = StreamProvider<AuthState>((ref) {
-  return ref.read(authServiceProvider).authStateChanges;
-});
-
-final currentUserProvider = Provider<User?>((ref) {
-  return ref.read(supabaseClientProvider).auth.currentUser;
+final selectedFolderProvider =
+    StateNotifierProvider<SelectedFolderNotifier, AsyncValue<String?>>((ref) {
+  return SelectedFolderNotifier(ref.read(localFolderServiceProvider));
 });
 
 // ─────────────────────────────────────
 // Feed content type filter
 // ─────────────────────────────────────
-enum FeedFilter { all, text, image, video }
+enum FeedFilter { all, text }
 
 final feedFilterProvider = StateProvider<FeedFilter>((ref) => FeedFilter.all);
 
 // ─────────────────────────────────────
-// Feed items provider
+// Custom Feed toggles (legacy alias)
+// ─────────────────────────────────────
+final customFeedNotesProvider = StateProvider<bool>((ref) => true);
+
+// ─────────────────────────────────────
+// Feed items provider (Unified Vaults items)
 // ─────────────────────────────────────
 final feedItemsProvider = FutureProvider<List<FeedItem>>((ref) async {
-  final user = ref.read(currentUserProvider);
-  if (user == null) return [];
+  final folderService = ref.read(localFolderServiceProvider);
+  final vaults = ref.watch(vaultsProvider);
+  final folderState = ref.watch(selectedFolderProvider);
 
-  final connected = await isConnected();
-  final feedService = ref.read(feedServiceProvider);
-  final cacheService = ref.read(localCacheServiceProvider);
+  List<FeedItem> allItems = [];
 
-  List<FeedItem> items;
+  if (!vaults.isCustomVaults) {
+    // One Vault mode
+    final rootPath = vaults.oneVaultPath ?? folderState.value;
 
-  if (connected) {
-    try {
-      items = await feedService.fetchFeedItems(user.id);
-      // Cache text items for offline use
-      final textItems =
-          items.where((i) => i.type == ContentType.text).toList();
-      await cacheService.cacheItems(textItems);
-
-      // Sync any pending offline items
-      final unsynced = await cacheService.getUnsyncedItems();
-      for (final item in unsynced) {
-        try {
-          await feedService.createFeedItem(item);
-          await cacheService.markSynced(item.id);
-        } catch (_) {
-          // Will retry on next sync
-        }
-      }
-    } catch (e) {
-      // Fall back to cache
-      items = await cacheService.getAllCachedItems(user.id);
+    if (vaults.enableNotes) {
+      final notes = await folderService.loadMarkdownItems(rootPath);
+      allItems.addAll(notes);
+    }
+    if (vaults.enableImages) {
+      final images = await folderService.loadImagesItems(rootPath);
+      allItems.addAll(images);
+    }
+    if (vaults.enableVideos) {
+      final videos = await folderService.loadVideosItems(rootPath);
+      allItems.addAll(videos);
+    }
+    if (vaults.enableAudios) {
+      final audios = await folderService.loadAudiosItems(rootPath);
+      allItems.addAll(audios);
     }
   } else {
-    // Offline: only text items from cache
-    items = await cacheService.getCachedTextItems(user.id);
-  }
-
-  // Apply filter
-  final filter = ref.read(feedFilterProvider);
-  if (filter != FeedFilter.all) {
-    items = items.where((item) {
-      switch (filter) {
-        case FeedFilter.text:
-          return item.type == ContentType.text;
-        case FeedFilter.image:
-          return item.type == ContentType.image;
-        case FeedFilter.video:
-          return item.type == ContentType.video;
-        default:
-          return true;
+    // Custom Vaults mode
+    if (vaults.enableNotes) {
+      final notesPath =
+          vaults.notesVaultPath ?? vaults.oneVaultPath ?? folderState.value;
+      final notes = await folderService.loadMarkdownItems(notesPath);
+      allItems.addAll(notes);
+    }
+    if (vaults.enableQuotes && vaults.quotesDirectoryPath != null) {
+      final quotes =
+          await folderService.loadQuotesItems(vaults.quotesDirectoryPath);
+      allItems.addAll(quotes);
+    }
+    if (vaults.enableImages && vaults.imagesDirectoryPath != null) {
+      final images =
+          await folderService.loadImagesItems(vaults.imagesDirectoryPath);
+      allItems.addAll(images);
+    }
+    if (vaults.enableVideos && vaults.videosDirectoryPath != null) {
+      final videos =
+          await folderService.loadVideosItems(vaults.videosDirectoryPath);
+      allItems.addAll(videos);
+    }
+    if (vaults.enableAudios && vaults.audiosDirectoryPath != null) {
+      final audios =
+          await folderService.loadAudiosItems(vaults.audiosDirectoryPath);
+      allItems.addAll(audios);
+    }
+    for (final customDir in vaults.customDirectories) {
+      if (customDir.isEnabled &&
+          customDir.path != null &&
+          customDir.path!.isNotEmpty) {
+        final customItems = await folderService.loadCustomItems(
+          customDir.path!,
+          customDir.type,
+        );
+        allItems.addAll(customItems);
       }
-    }).toList();
+    }
   }
 
-  // Randomize with 10-item gap constraint
-  return FeedRandomizer.shuffle(items);
+  // Deduplicate by path/id
+  final seen = <String>{};
+  allItems = allItems.where((item) => seen.add(item.id)).toList();
+
+  // Apply feed filter if needed
+  final filter = ref.watch(feedFilterProvider);
+  if (filter == FeedFilter.text) {
+    allItems = allItems.where((item) => item.type == ContentType.text).toList();
+  }
+
+  allItems.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return allItems;
 });
 
 // ─────────────────────────────────────

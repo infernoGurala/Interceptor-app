@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:path/path.dart' as p;
 import '../providers/providers.dart';
+import '../providers/vaults_provider.dart';
+import '../themes/app_fonts.dart';
 import '../themes/app_themes.dart';
 import '../themes/theme_provider.dart';
-import '../widgets/theme_preview_card.dart';
-import '../models/feed_item.dart';
+import 'manager_screen.dart';
 
-/// Profile screen — account, appearance, and content management.
+/// Minimal Settings screen — storage folder, appearance, and typography.
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
@@ -18,488 +19,519 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  bool _accountExpanded = false;
-  bool _appearanceExpanded = false;
-  bool _contentExpanded = false;
+  String _themeFilter = 'All';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeState = ref.watch(themeProvider);
-    final user = ref.read(currentUserProvider);
+    final vaults = ref.watch(vaultsProvider);
+    final folderPath = ref.watch(selectedFolderProvider).value;
+    final noteCount = ref.watch(feedItemsProvider).value?.length ?? 0;
+    final muted = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6);
+
+    final String folderSubtitle;
+    if (vaults.isCustomVaults) {
+      folderSubtitle = 'Custom Vaults';
+    } else if (folderPath != null) {
+      folderSubtitle = p.basename(folderPath).isEmpty ? folderPath : p.basename(folderPath);
+    } else {
+      folderSubtitle = 'Configure directory';
+    }
+
+    final currentThemes =
+        AppThemes.getFilteredThemes(themeState.isDark, _themeFilter);
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Text(
-                'Profile',
-                style: GoogleFonts.inter(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w700,
-                  color: theme.textTheme.bodyLarge?.color,
-                  letterSpacing: -1,
-                ),
-              )
-                  .animate()
-                  .fadeIn(duration: 400.ms)
-                  .slideX(begin: -0.1, end: 0),
-              const SizedBox(height: 32),
+        child: ListView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 120),
+          children: [
+            Text(
+              'Settings',
+              style: GoogleFonts.inter(
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -1.2,
+                color: theme.textTheme.bodyLarge?.color,
+              ),
+            ),
+            const SizedBox(height: 32),
 
-              // ───── ACCOUNT SECTION ─────
-              _buildSection(
-                title: 'Account',
-                icon: Icons.person_outline_rounded,
-                isExpanded: _accountExpanded,
-                onTap: () =>
-                    setState(() => _accountExpanded = !_accountExpanded),
-                theme: theme,
-                child: Column(
+            // Storage
+            _Label('Storage', color: muted),
+            const SizedBox(height: 12),
+            _Group(children: [
+              _Row(
+                icon: Icons.folder_open_outlined,
+                title: 'Manager',
+                subtitle: folderSubtitle,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // User info
-                    Row(
-                      children: [
-                        // Avatar
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color:
-                                theme.colorScheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            Icons.person_rounded,
-                            color: theme.colorScheme.primary,
-                            size: 28,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                user?.email?.split('@').first ?? 'User',
-                                style: GoogleFonts.inter(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w600,
-                                  color: theme.textTheme.bodyLarge?.color,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                user?.email ?? '',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  color: theme.textTheme.bodySmall?.color,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Sign out
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _handleSignOut,
-                        icon: const Icon(Icons.logout_rounded, size: 18),
-                        label: const Text('Sign out'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: theme.colorScheme.error,
-                          side: BorderSide(
-                            color: theme.colorScheme.error.withValues(alpha: 0.3),
-                          ),
-                        ),
-                      ),
-                    ),
+                    _Value('$noteCount items'),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded, size: 20, color: muted),
                   ],
                 ),
-              )
-                  .animate()
-                  .fadeIn(delay: 100.ms, duration: 400.ms)
-                  .slideY(begin: 0.05, end: 0),
-              const SizedBox(height: 12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ManagerScreen()),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 32),
 
-              // ───── APPEARANCE SECTION ─────
-              _buildSection(
-                title: 'Appearance',
-                icon: Icons.palette_outlined,
-                isExpanded: _appearanceExpanded,
-                onTap: () => setState(
-                    () => _appearanceExpanded = !_appearanceExpanded),
-                theme: theme,
+            // Appearance
+            _Label('Appearance', color: muted),
+            const SizedBox(height: 12),
+            _Group(children: [
+              _Row(
+                icon: Icons.dark_mode_outlined,
+                title: 'Dark mode',
+                trailing: Switch.adaptive(
+                  value: themeState.isDark,
+                  activeTrackColor: theme.colorScheme.primary,
+                  onChanged: (v) =>
+                      ref.read(themeProvider.notifier).setDarkMode(v),
+                ),
+                onTap: () => ref
+                    .read(themeProvider.notifier)
+                    .setDarkMode(!themeState.isDark),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Light / Dark toggle
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        Icon(Icons.palette_outlined, size: 20, color: muted),
+                        const SizedBox(width: 14),
                         Text(
-                          'Dark mode',
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            color: theme.textTheme.bodyLarge?.color,
-                          ),
+                          'Theme',
+                          style: _rowTitle(theme),
                         ),
-                        Switch.adaptive(
-                          value: themeState.isDark,
-                          onChanged: (value) {
-                            ref
-                                .read(themeProvider.notifier)
-                                .setDarkMode(value);
-                          },
-                          activeTrackColor: theme.colorScheme.primary,
+                        const Spacer(),
+                        DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _themeFilter,
+                            icon: Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              size: 18,
+                              color: muted,
+                            ),
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: muted,
+                            ),
+                            dropdownColor: theme.brightness == Brightness.dark
+                                ? const Color(0xFF1E1E1E)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            isDense: true,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'All',
+                                child: Text('All'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Dichrome',
+                                child: Text('Dichrome'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Trichrome',
+                                child: Text('Trichrome'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) {
+                                setState(() => _themeFilter = v);
+                              }
+                            },
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-
-                    Text(
-                      'Theme',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textTheme.bodySmall?.color,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Theme grid
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.3,
-                      ),
-                      itemCount: AppThemes.themeNames.length,
-                      itemBuilder: (context, index) {
-                        final name = AppThemes.themeNames[index];
-                        return ThemePreviewCard(
-                          themeName: name,
-                          isDark: themeState.isDark,
-                          isSelected:
-                              themeState.themeName.toLowerCase() ==
+                    const SizedBox(height: 16),
+                    if (currentThemes.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'No $_themeFilter themes yet',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: muted,
+                          ),
+                        ),
+                      )
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final name in currentThemes)
+                            _Swatch(
+                              name: name,
+                              base: AppThemes.getBaseColor(
+                                  name, themeState.isDark),
+                              accent: AppThemes.getAccentColor(
+                                  name, themeState.isDark),
+                              selected: themeState.themeName.toLowerCase() ==
                                   name.toLowerCase(),
-                          onTap: () {
-                            ref.read(themeProvider.notifier).setTheme(name);
-                          },
-                        );
-                      },
-                    ),
+                              onTap: () => ref
+                                  .read(themeProvider.notifier)
+                                  .setTheme(name),
+                            ),
+                        ],
+                      ),
                   ],
                 ),
-              )
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 400.ms)
-                  .slideY(begin: 0.05, end: 0),
-              const SizedBox(height: 12),
+              ),
+            ]),
+            const SizedBox(height: 32),
 
-              // ───── CONTENT SECTION ─────
-              _buildSection(
-                title: 'Content',
-                icon: Icons.grid_view_rounded,
-                isExpanded: _contentExpanded,
-                onTap: () =>
-                    setState(() => _contentExpanded = !_contentExpanded),
-                theme: theme,
-                child: _buildContentGrid(theme),
-              )
-                  .animate()
-                  .fadeIn(delay: 300.ms, duration: 400.ms)
-                  .slideY(begin: 0.05, end: 0),
+            // Font
+            _Label('Font', color: muted),
+            const SizedBox(height: 12),
+            for (var i = 0; i < AppFonts.presets.length; i++) ...[
+              if (i > 0) const SizedBox(height: 10),
+              _FontPairBox(
+                preset: AppFonts.presets[i],
+                isSelected: themeState.fontPair.id == AppFonts.presets[i].id,
+                onTap: () => ref
+                    .read(themeProvider.notifier)
+                    .setFont(AppFonts.presets[i].id),
+              ),
+            ],
+          ]
+              .animate(interval: 40.ms)
+              .fadeIn(duration: 300.ms, curve: Curves.easeOut),
+        ),
+      ),
+    );
+  }
+}
+
+TextStyle _rowTitle(ThemeData theme) => GoogleFonts.inter(
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      color: theme.textTheme.bodyLarge?.color,
+    );
+
+class _Label extends StatelessWidget {
+  final String text;
+  final Color? color;
+  const _Label(this.text, {this.color});
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: GoogleFonts.inter(
+            fontSize: 13, fontWeight: FontWeight.w500, color: color),
+      );
+}
+
+class _Value extends StatelessWidget {
+  final String text;
+  const _Value(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final muted =
+        Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 140),
+      child: Text(
+        text,
+        style: GoogleFonts.inter(fontSize: 14, color: muted),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+/// Grouped flat container with hairline dividers between children.
+class _Group extends StatelessWidget {
+  final List<Widget> children;
+  const _Group({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final line = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.black.withValues(alpha: 0.05);
+
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.black.withValues(alpha: 0.025),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: line),
+      ),
+      child: Column(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1, thickness: 1, color: line, indent: 52),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _Row extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback onTap;
+
+  const _Row({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 54),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: muted),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title, style: _rowTitle(theme)),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle!,
+                          style: GoogleFonts.inter(fontSize: 12, color: muted),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 12),
+                  trailing!,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact theme chip with 2-color swatch and theme name.
+class _Swatch extends StatelessWidget {
+  final String name;
+  final Color base;
+  final Color accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _Swatch({
+    required this.name,
+    required this.base,
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final primary = theme.colorScheme.primary;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? primary.withValues(alpha: 0.12)
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.black.withValues(alpha: 0.03)),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? primary
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.06)),
+              width: selected ? 1.5 : 1.0,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Two-tone color dot
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: base,
+                  border: Border.all(
+                    color: Colors.grey.withValues(alpha: 0.3),
+                    width: 0.5,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                name,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: selected
+                      ? theme.textTheme.bodyLarge?.color
+                      : theme.textTheme.bodySmall?.color?.withValues(alpha: 0.8),
+                ),
+              ),
+              if (selected) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.check_rounded, size: 14, color: primary),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildSection({
-    required String title,
-    required IconData icon,
-    required bool isExpanded,
-    required VoidCallback onTap,
-    required ThemeData theme,
-    required Widget child,
-  }) {
+/// Rectangular font preview box with live render of selected theme applied to the font pair.
+class _FontPairBox extends StatelessWidget {
+  final FontPair preset;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _FontPairBox({
+    required this.preset,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final primary = theme.colorScheme.primary;
+    final muted = theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
+    return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withValues(alpha: 0.04)
-            : Colors.black.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(16),
+            : Colors.black.withValues(alpha: 0.025),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : Colors.black.withValues(alpha: 0.04),
+          color: isSelected
+              ? primary.withValues(alpha: 0.5)
+              : (isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : Colors.black.withValues(alpha: 0.05)),
+          width: isSelected ? 1.5 : 1.0,
         ),
       ),
-      child: Column(
-        children: [
-          // Section header
-          InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Icon(icon,
-                      size: 20, color: theme.textTheme.bodySmall?.color),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: theme.textTheme.bodyLarge?.color,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        preset.headFontName,
+                        style: preset.headStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: theme.textTheme.bodyLarge?.color,
+                          letterSpacing: -0.3,
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 3),
+                      Text(
+                        preset.bodyFontName,
+                        style: preset.bodyStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                          color: muted,
+                        ),
+                      ),
+                    ],
                   ),
-                  AnimatedRotation(
-                    turns: isExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      color: theme.textTheme.bodySmall?.color,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Section content
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: child,
-            ),
-            crossFadeState: isExpanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 300),
-            sizeCurve: Curves.easeOutCubic,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContentGrid(ThemeData theme) {
-    final feedAsync = ref.watch(feedItemsProvider);
-
-    return feedAsync.when(
-      data: (items) {
-        if (items.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'No content yet',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: theme.textTheme.bodySmall?.color,
                 ),
-              ),
+                if (isSelected)
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: primary.withValues(alpha: 0.15),
+                    ),
+                    child: Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: primary,
+                    ),
+                  ),
+              ],
             ),
-          );
-        }
-
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-          ),
-          itemCount: items.length,
-          itemBuilder: (context, index) {
-            final item = items[index];
-            return _buildContentTile(item, theme);
-          },
-        );
-      },
-      loading: () => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      ),
-      error: (e, st) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: Text(
-            'Could not load content',
-            style: TextStyle(color: theme.colorScheme.error),
           ),
         ),
       ),
     );
-  }
-
-  Widget _buildContentTile(FeedItem item, ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-
-    return GestureDetector(
-      onLongPress: () => _showDeleteDialog(item),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : Colors.black.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: _buildTileContent(item, theme),
-      ),
-    );
-  }
-
-  Widget _buildTileContent(FeedItem item, ThemeData theme) {
-    switch (item.type) {
-      case ContentType.image:
-        return CachedNetworkImage(
-          imageUrl: item.content,
-          fit: BoxFit.cover,
-          placeholder: (ctx, url) => Center(
-            child: Icon(Icons.image_rounded,
-                color: theme.textTheme.bodySmall?.color, size: 24),
-          ),
-          errorWidget: (ctx, url, err) => Center(
-            child: Icon(Icons.broken_image_rounded,
-                color: theme.colorScheme.error, size: 24),
-          ),
-        );
-      case ContentType.video:
-        return Center(
-          child: Icon(Icons.play_circle_outline_rounded,
-              color: theme.textTheme.bodySmall?.color, size: 32),
-        );
-      case ContentType.text:
-        return Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(
-            item.content,
-            style: GoogleFonts.inter(
-              fontSize: 10,
-              color: theme.textTheme.bodySmall?.color,
-              height: 1.3,
-            ),
-            maxLines: 5,
-            overflow: TextOverflow.ellipsis,
-          ),
-        );
-    }
-  }
-
-  void _showDeleteDialog(FeedItem item) {
-    final theme = Theme.of(context);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Delete content?',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-        ),
-        content: const Text('This cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _deleteItem(item);
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: theme.colorScheme.error,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _deleteItem(FeedItem item) async {
-    try {
-      final feedService = ref.read(feedServiceProvider);
-      await feedService.deleteFeedItem(item.id);
-
-      final cache = ref.read(localCacheServiceProvider);
-      await cache.markDeleted(item.id);
-
-      ref.invalidate(feedItemsProvider);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Content deleted'),
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Delete failed: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _handleSignOut() async {
-    try {
-      final authService = ref.read(authServiceProvider);
-      final cache = ref.read(localCacheServiceProvider);
-
-      await cache.clearAll();
-      await authService.signOut();
-
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/auth');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sign out failed: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
   }
 }

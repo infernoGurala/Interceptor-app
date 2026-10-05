@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
@@ -42,8 +43,12 @@ class _VideoCardState extends State<VideoCard>
 
   Future<void> _initVideo() async {
     try {
-      _videoController =
-          VideoPlayerController.networkUrl(Uri.parse(widget.item.content));
+      final path = widget.item.content;
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        _videoController = VideoPlayerController.networkUrl(Uri.parse(path));
+      } else {
+        _videoController = VideoPlayerController.file(File(path));
+      }
       await _videoController!.initialize();
       _videoController!.setVolume(0); // Sound off by default
 

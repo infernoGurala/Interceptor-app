@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'config/supabase_config.dart';
+import 'themes/app_fonts.dart';
 import 'themes/theme_provider.dart';
-import 'screens/splash_screen.dart';
-import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
@@ -24,11 +21,8 @@ void main() async {
   // Enable edge-to-edge
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  // Initialize Supabase
-  await Supabase.initialize(
-    url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.anonKey,
-  );
+  // Load custom fonts
+  AppFonts.ensureFontsLoaded();
 
   runApp(
     const ProviderScope(
@@ -43,17 +37,25 @@ class InterceptorApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeState = ref.watch(themeProvider);
+    final isDark = themeState.themeData.brightness == Brightness.dark;
 
-    return MaterialApp(
-      title: 'Interceptor',
-      debugShowCheckedModeBanner: false,
-      theme: themeState.themeData,
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const SplashScreen(),
-        '/auth': (context) => const AuthScreen(),
-        '/home': (context) => const HomeScreen(),
-      },
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      ),
+      child: MaterialApp(
+        title: 'Interceptor',
+        debugShowCheckedModeBanner: false,
+        theme: themeState.themeData,
+        initialRoute: '/',
+        routes: {
+          '/': (context) => const HomeScreen(),
+          '/home': (context) => const HomeScreen(),
+        },
+      ),
     );
   }
 }
